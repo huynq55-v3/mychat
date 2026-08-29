@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fibonacci Step Torus Flow - Golden Convergence</title>
+  <style>
+    body {
+      margin: 0;
+      background-color: #020204;
+      overflow: hidden;
+      font-family: monospace;
+      color: #e2e8f0;
+    }
+    #ui {
+      position: absolute;
+      top: 15px;
+      left: 20px;
+      z-index: 10;
+      background: rgba(10, 15, 25, 0.85);
+      backdrop-filter: blur(10px);
+      padding: 16px 20px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-width: 320px;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.6);
+    }
+    .title {
+      font-size: 13px;
+      font-weight: bold;
+      color: #38bdf8;
+      letter-spacing: 1.5px;
+    }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+    }
+    input[type="range"] {
+      width: 150px;
+      cursor: pointer;
+    }
+    select {
+      background: #1e293b;
+      color: #38bdf8;
+      border: 1px solid #475569;
+      padding: 4px 8px;
+      border-radius: 5px;
+      font-family: monospace;
+      outline: none;
+      cursor: pointer;
+    }
+    .metrics {
+      font-size: 11px;
+      color: #94a3b8;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      padding-top: 8px;
+      line-height: 1.6;
+    }
+    .accent {
+      color: #4ade80;
+      font-weight: bold;
+    }
+    .target {
+      color: #fbbf24;
+      font-weight: bold;
+    }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="ui">
+    <div class="title">FIBONACCI TORUS // PHI CONVERGENCE</div>
+
+    <div class="row">
+      <label>Chế độ Tỷ số:</label>
+      <select id="modeSelect">
+        <option value="sub" selected>Fn / Fn+1 (Dưới 1 → 1/Φ)</option>
+        <option value="super">Fn+1 / Fn (Trên 1 → Φ)</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label id="sliderLabel">Bậc Fibonacci: 5 / 8</label>
+      <input type="range" id="fiboSlider" min="2" max="11" step="1" value="4">
+    </div>
+
+    <div class="metrics" id="metrics">
+      Tỷ số hiện tại: <span class="accent" id="currRatio">5 / 8 = 0.625000</span><br>
+      Đích tiệm cận: <span class="target" id="targetPhi">1/Φ ≈ 0.6180339887</span><br>
+      Sai số tiệm cận: <span id="errorVal" style="color:#f87171;">+0.006966</span>
+    </div>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // 1. Dãy Fibonacci
+    const FIBO = [1, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377];
+    const PHI = (1 + Math.sqrt(5)) / 2; // 1.6180339887...
+    const INV_PHI = 1 / PHI;            // 0.6180339887...
+
+    // 2. Scene Setup
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 0, 8.5);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    document.body.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+
+    const mainGroup = new THREE.Group();
+    scene.add(mainGroup);
+
+    // 3. Horn Torus Wireframe (R = r)
+    const R = 2.0;
+    const r = 2.0;
+
+    const torusGeo = new THREE.TorusGeometry(R, r, 32, 64);
+    const torusMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.09
+    });
+    const torusMesh = new THREE.Mesh(torusGeo, torusMat);
+    torusMesh.rotation.x = Math.PI / 2;
+    mainGroup.add(torusMesh);
+
+    // 4. Mạng hạt năng lượng
+    const COUNT = 6500;
+    const pPositions = new Float32Array(COUNT * 3);
+    const pColors = new Float32Array(COUNT * 3);
+    const particles = [];
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 16;
+    canvas.height = 16;
+    const ctx = canvas.getContext('2d');
+    const grad = ctx.createRadialGradient(8, 8, 0, 8, 8, 8);
+    grad.addColorStop(0, 'rgba(255,255,255,1)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 16, 16);
+    const pTexture = new THREE.CanvasTexture(canvas);
+
+    const pGeom = new THREE.BufferGeometry();
+    pGeom.setAttribute('position', new THREE.BufferAttribute(pPositions, 3));
+    pGeom.setAttribute('color', new THREE.BufferAttribute(pColors, 3));
+
+    const pMat = new THREE.PointsMaterial({
+      size: 0.12,
+      vertexColors: true,
+      map: pTexture,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+
+    const pSystem = new THREE.Points(pGeom, pMat);
+    mainGroup.add(pSystem);
+
+    for (let i = 0; i < COUNT; i++) {
+      particles.push({
+        t: i / COUNT,
+        speed: 0.00035
+      });
+    }
+
+    // 5. Quản lý trạng thái Fibonacci
+    let p = 5;
+    let q = 8;
+    let mode = 'sub'; // 'sub' (Fn / Fn+1) hoặc 'super' (Fn+1 / Fn)
+
+    function updateFibonacciState() {
+      const idx = parseInt(document.getElementById('fiboSlider').value);
+      const f_n = FIBO[idx];
+      const f_next = FIBO[idx + 1];
+
+      if (mode === 'sub') {
+        p = f_n;
+        q = f_next;
+      } else {
+        p = f_next;
+        q = f_n;
+      }
+
+      const ratio = p / q;
+      const target = mode === 'sub' ? INV_PHI : PHI;
+      const targetLabel = mode === 'sub' ? '1/Φ ≈ 0.6180339887' : 'Φ ≈ 1.6180339887';
+      const diff = ratio - target;
+
+      document.getElementById('sliderLabel').textContent = `Bậc: ${p} / ${q}`;
+      document.getElementById('currRatio').textContent = `${p} / ${q} = ${ratio.toFixed(6)}`;
+      document.getElementById('targetPhi').textContent = targetLabel;
+      document.getElementById('errorVal').textContent = (diff >= 0 ? '+' : '') + diff.toFixed(6);
+    }
+
+    document.getElementById('fiboSlider').addEventListener('input', updateFibonacciState);
+    document.getElementById('modeSelect').addEventListener('change', (e) => {
+      mode = e.target.value;
+      updateFibonacciState();
+    });
+
+    updateFibonacciState();
+
+    // 6. Cập nhật động lực học
+    function updateDynamics() {
+      const pos = pGeom.attributes.position.array;
+      const col = pGeom.attributes.color.array;
+
+      for (let i = 0; i < COUNT; i++) {
+        const pt = particles[i];
+        pt.t = (pt.t + pt.speed) % 1.0;
+
+        const phi = pt.t * Math.PI * 2 * q;
+        const theta = phi * (p / q);
+
+        const x = (R + r * Math.cos(theta)) * Math.cos(phi);
+        const z = (R + r * Math.cos(theta)) * Math.sin(phi);
+        const y = r * Math.sin(theta);
+
+        const idx = i * 3;
+        pos[idx] = x;
+        pos[idx + 1] = y;
+        pos[idx + 2] = z;
+
+        const coreFactor = (1 - Math.cos(theta)) / 2;
+
+        if (mode === 'sub') {
+          // Mode Thoải (Xanh Lam - Lõi Sáng Trắng)
+          col[idx] = 0.2 + Math.pow(coreFactor, 2) * 0.8;
+          col[idx + 1] = 0.6 + Math.pow(coreFactor, 1.5) * 0.4;
+          col[idx + 2] = 1.0;
+        } else {
+          // Mode Dốc Đứng (Cam Vàng Kim - Lõi Siêu Nén)
+          col[idx] = 1.0;
+          col[idx + 1] = 0.4 + coreFactor * 0.6;
+          col[idx + 2] = 0.1 + Math.pow(coreFactor, 2) * 0.9;
+        }
+      }
+
+      pGeom.attributes.position.needsUpdate = true;
+      pGeom.attributes.color.needsUpdate = true;
+    }
+
+    // 7. Render Loop
+    function animate() {
+      requestAnimationFrame(animate);
+
+      updateDynamics();
+      mainGroup.rotation.y += 0.0025;
+
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    animate();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
